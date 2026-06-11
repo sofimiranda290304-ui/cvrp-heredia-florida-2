@@ -1,0 +1,45 @@
+# ============================================================
+#  cvrp_heredia.mod  –  Capacitated Vehicle Routing Problem
+#  Florida Bebidas – Provincia de Heredia (10 cantones)
+#  Modelo AMPL  |  II-1122  |  UCR Sede Alajuela
+# ============================================================
+
+# ---------- CONJUNTOS ----------
+set NODES;                       # {0,1,...,10}  0 = CD Heredia
+set ARCS within {NODES, NODES};  # pares (i,j) con i != j
+
+# ---------- PARÁMETROS ----------
+param dist {ARCS} >= 0;          # distancia en km
+param demand {NODES} >= 0;       # demanda en pallets (nodo 0 = 0)
+param capacity := 24;            # capacidad por camión (pallets)
+param total_demand := sum {i in NODES} demand[i];
+
+# ---------- VARIABLES ----------
+var y {ARCS} integer >= 0;       # número de camiones en arco (i,j)
+var f {ARCS} >= 0;               # carga (pallets) en arco (i,j)
+
+# ---------- FUNCIÓN OBJETIVO ----------
+minimize TotalDist:
+    sum {(i,j) in ARCS} dist[i,j] * y[i,j];
+
+# ---------- RESTRICCIONES ----------
+
+# R1: Balance de camiones – entran = salen en cada nodo cliente
+subject to FlowBalance {k in NODES diff {0}}:
+    sum {(i,k) in ARCS} y[i,k] - sum {(k,j) in ARCS} y[k,j] = 0;
+
+# R2: Balance de carga – lo que llega menos lo que sale = demanda del nodo
+subject to LoadBalance {k in NODES diff {0}}:
+    sum {(i,k) in ARCS} f[i,k] - sum {(k,j) in ARCS} f[k,j] = demand[k];
+
+# R3: Carga total que sale del CD = demanda total
+subject to DepotOut:
+    sum {(0,j) in ARCS} f[0,j] = total_demand;
+
+# R4: Capacidad por arco – ningún camión carga más de 24 pallets
+subject to Capacity {(i,j) in ARCS}:
+    f[i,j] <= capacity * y[i,j];
+
+# R5: Al menos un camión en arco si hay carga
+subject to LoadIfTruck {(i,j) in ARCS}:
+    f[i,j] >= 0;
