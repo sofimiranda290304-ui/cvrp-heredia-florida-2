@@ -1,47 +1,31 @@
 """
 app.py  –  CVRP Florida Bebidas · Provincia de Heredia
-Streamlit + Python (solver heurístico CVRP integrado)
-II-1122 · UCR Sede Alajuela
+Streamlit + Python  |  II-1122 · UCR Sede Alajuela
+Modelo: cada trip = 1 camión (24 pallets). Total: 15 camiones.
 """
 
-import os
 import streamlit as st
 import pandas as pd
-import numpy as np
 
 # ─────────────────────────────────────────────────────────────────────────────
-# PALETA DE COLORES
+# PALETA
 # ─────────────────────────────────────────────────────────────────────────────
-C1 = "#F6FFEA"
-C2 = "#FFDE96"
-C3 = "#FA855A"
-C4 = "#C93638"
-C5 = "#62C4DA"
+C1, C2, C3, C4, C5 = "#F6FFEA", "#FFDE96", "#FA855A", "#C93638", "#62C4DA"
 
 # ─────────────────────────────────────────────────────────────────────────────
-# DATOS DE HEREDIA
+# DATOS
 # ─────────────────────────────────────────────────────────────────────────────
 NODOS = {
-    0: "CD Heredia",
-    1: "Heredia",
-    2: "Barva",
-    3: "Santo Domingo",
-    4: "Santa Bárbara",
-    5: "San Rafael",
-    6: "San Isidro",
-    7: "Belén",
-    8: "Flores",
-    9: "San Pablo",
-    10: "Sarapiquí",
+    0:"CD Heredia", 1:"Heredia", 2:"Barva", 3:"Santo Domingo",
+    4:"Santa Bárbara", 5:"San Rafael", 6:"San Isidro",
+    7:"Belén", 8:"Flores", 9:"San Pablo", 10:"Sarapiquí",
 }
-
-DEMANDA = {0:0, 1:99, 2:36, 3:35, 4:29, 5:36, 6:17, 7:17, 8:16, 9:23, 10:51}
-DEMANDA_IMPERIAL = {1:49, 2:18, 3:17, 4:15, 5:18, 6:9,  7:9,  8:8,  9:11, 10:25}
-DEMANDA_PILSEN   = {1:25, 2:9,  3:9,  4:7,  5:9,  6:4,  7:4,  8:4,  9:6,  10:13}
-DEMANDA_TROPICAL = {1:25, 2:9,  3:9,  4:7,  5:9,  6:4,  7:4,  8:4,  9:6,  10:13}
+DEMANDA       = {0:0,  1:99, 2:36, 3:35, 4:29, 5:36, 6:17, 7:17, 8:16, 9:23, 10:51}
+DEM_IMPERIAL  = {1:49, 2:18, 3:17, 4:15, 5:18, 6:9,  7:9,  8:8,  9:11, 10:25}
+DEM_PILSEN    = {1:25, 2:9,  3:9,  4:7,  5:9,  6:4,  7:4,  8:4,  9:6,  10:13}
+DEM_TROPICAL  = {1:25, 2:9,  3:9,  4:7,  5:9,  6:4,  7:4,  8:4,  9:6,  10:13}
 
 DIST_RAW = [
-#    0     1     2     3     4     5     6     7     8     9    10
  [0.0,  0.0,  3.0,  5.0,  7.0,  5.0, 11.0, 10.0,  5.0,  5.0, 69.0],
  [0.0,  0.0,  3.0,  5.0,  7.0,  5.0, 11.0, 10.0,  5.0,  5.0, 69.0],
  [3.0,  3.0,  0.0,  7.0,  5.0,  5.0, 10.0, 11.0,  5.0,  7.0, 67.0],
@@ -55,23 +39,19 @@ DIST_RAW = [
  [69.0,69.0, 67.0, 71.0, 65.0, 66.0, 63.0, 74.0, 70.0, 71.0,  0.0],
 ]
 
-CAPACIDAD    = 24
-VELOCIDAD    = 40
-MIN_PARADA   = 15
-MIN_PALLET   = 3
-MIN_RELOAD   = 20
-JORNADA_MIN  = 480
-DEMANDA_TOTAL = sum(DEMANDA[i] for i in range(1, 11))  # 359
+CAPACIDAD   = 24
+VELOCIDAD   = 40
+MIN_PARADA  = 15
+MIN_PALLET  = 3
+JORNADA_MIN = 480
+DEM_TOTAL   = sum(DEMANDA[i] for i in range(1, 11))  # 359
 
-# Contenido del modelo AMPL embebido (evita problemas de ruta en Cloud)
 AMPL_MOD = """\
 # ============================================================
-#  cvrp_heredia.mod  –  Capacitated Vehicle Routing Problem
-#  Florida Bebidas – Provincia de Heredia (10 cantones)
+#  cvrp_heredia.mod  –  CVRP Florida Bebidas – Heredia
 #  Modelo AMPL  |  II-1122  |  UCR Sede Alajuela
 # ============================================================
-
-set NODES;
+set NODES;                        # {0,1,...,10}  0 = CD
 set ARCS within {NODES, NODES};
 
 param dist     {ARCS} >= 0;
@@ -79,211 +59,163 @@ param demand   {NODES} >= 0;
 param capacity := 24;
 param total_demand := sum {i in NODES} demand[i];
 
-var y {ARCS} integer >= 0;   # camiones por arco
-var f {ARCS}          >= 0;  # carga (pallets) por arco
+var y {ARCS} integer >= 0;        # camiones en arco i->j
+var f {ARCS}          >= 0;       # carga (pallets) en arco i->j
 
 minimize TotalDist:
     sum {(i,j) in ARCS} dist[i,j] * y[i,j];
 
+# R1: Balance de camiones
 subject to FlowBalance {k in NODES diff {0}}:
     sum {(i,k) in ARCS} y[i,k] - sum {(k,j) in ARCS} y[k,j] = 0;
 
+# R2: Balance de carga
 subject to LoadBalance {k in NODES diff {0}}:
     sum {(i,k) in ARCS} f[i,k] - sum {(k,j) in ARCS} f[k,j] = demand[k];
 
+# R3: Carga total desde CD = demanda total
 subject to DepotOut:
     sum {(0,j) in ARCS} f[0,j] = total_demand;
 
+# R4: Capacidad por arco
 subject to Capacity {(i,j) in ARCS}:
     f[i,j] <= capacity * y[i,j];
 """
 
 # ─────────────────────────────────────────────────────────────────────────────
-# HELPERS
+# SOLVER
 # ─────────────────────────────────────────────────────────────────────────────
 
-def dist_arco(i, j):
-    return DIST_RAW[i][j]
+def d(i, j): return DIST_RAW[i][j]
 
-def route_distance(route):
-    d = dist_arco(0, route[0])
-    for k in range(len(route) - 1):
-        d += dist_arco(route[k], route[k + 1])
-    d += dist_arco(route[-1], 0)
-    return d
+def route_dist(route):
+    dist = d(0, route[0])
+    for k in range(len(route)-1): dist += d(route[k], route[k+1])
+    return dist + d(route[-1], 0)
 
 def two_opt(route):
     best = route[:]
     improved = True
     while improved:
         improved = False
-        for i in range(1, len(best) - 1):
-            for j in range(i + 1, len(best)):
-                new_route = best[:i] + best[i:j + 1][::-1] + best[j + 1:]
-                if route_distance(new_route) < route_distance(best):
-                    best = new_route
-                    improved = True
+        for i in range(1, len(best)-1):
+            for j in range(i+1, len(best)):
+                nr = best[:i] + best[i:j+1][::-1] + best[j+1:]
+                if route_dist(nr) < route_dist(best):
+                    best, improved = nr, True
     return best
 
-def trip_duration_min(trip):
-    n_stops = len(trip["route"])
-    return (trip["dist_km"] / VELOCIDAD * 60) + n_stops * MIN_PARADA + trip["load"] * MIN_PALLET
-
-# ─────────────────────────────────────────────────────────────────────────────
-# SOLVER CVRP
-# ─────────────────────────────────────────────────────────────────────────────
+def trip_min(trip):
+    return (trip["dist_km"]/VELOCIDAD*60) + len(trip["route"])*MIN_PARADA + trip["load"]*MIN_PALLET
 
 @st.cache_data
 def run_solver():
+    """
+    Nearest-Neighbor + 2-opt.
+    CADA TRIP = 1 CAMIÓN (modelo CVRP: y(i,j) cuenta camiones por arco).
+    """
     remaining = {i: DEMANDA[i] for i in range(1, 11)}
     trips = []
 
     while any(v > 0 for v in remaining.values()):
-        current = 0
-        load = 0
-        route = []
+        current, load, route = 0, 0, []
         available = {i: remaining[i] for i in remaining if remaining[i] > 0}
 
         while available:
-            nearest = min(available.keys(), key=lambda j: dist_arco(current, j))
+            nearest = min(available, key=lambda j: d(current, j))
             can_load = min(available[nearest], CAPACIDAD - load)
-            if can_load <= 0:
-                break
+            if can_load <= 0: break
             route.append(nearest)
             load += can_load
             remaining[nearest] -= can_load
-            if remaining[nearest] == 0:
-                del available[nearest]
-            else:
-                available[nearest] = remaining[nearest]
-            if load >= CAPACIDAD:
-                break
+            if remaining[nearest] == 0: del available[nearest]
+            else: available[nearest] = remaining[nearest]
+            if load >= CAPACIDAD: break
             current = nearest
 
         if route:
             route = two_opt(route)
             trips.append({
                 "route": route,
-                "load": load,
-                "dist_km": round(route_distance(route), 1),
+                "load":  load,
+                "dist_km": round(route_dist(route), 1),
             })
 
-    # Bin-packing trips → camiones físicos
-    trucks = []
-    for trip in trips:
-        dur = trip_duration_min(trip)
-        assigned = False
-        for truck in trucks:
-            used = sum(trip_duration_min(t) for t in truck) + max(0, len(truck) - 1) * MIN_RELOAD
-            if used + MIN_RELOAD + dur <= JORNADA_MIN:
-                truck.append(trip)
-                assigned = True
-                break
-        if not assigned:
-            trucks.append([trip])
-
-    return trips, trucks
+    return trips  # cada elemento = 1 camión
 
 # ─────────────────────────────────────────────────────────────────────────────
 # CSS
 # ─────────────────────────────────────────────────────────────────────────────
 
 def inject_css():
-    st.markdown(f"""
-    <style>
-      .stApp {{ background-color: {C1}; }}
-      section[data-testid="stSidebar"] {{ background-color: {C2}; }}
-      .metric-card {{
-        background: white;
-        border-left: 5px solid {C3};
-        border-radius: 8px;
-        padding: 14px 18px;
-        margin: 6px 0;
-        box-shadow: 0 2px 6px rgba(0,0,0,0.08);
-      }}
-      .metric-card h2 {{ color: {C4}; font-size: 2rem; margin: 0; }}
-      .metric-card p  {{ color: #555; font-size: 0.85rem; margin: 0; }}
-      .section-header {{
-        background: linear-gradient(90deg, {C4}, {C3});
-        color: white;
-        padding: 10px 18px;
-        border-radius: 8px;
-        font-size: 1.1rem;
-        font-weight: 700;
-        margin: 20px 0 10px;
-      }}
-      .node-badge {{
-        display: inline-block;
-        background: {C5};
-        color: white;
-        border-radius: 50%;
-        width: 28px; height: 28px;
-        text-align: center;
-        line-height: 28px;
-        font-weight: bold;
-        font-size: 0.85rem;
-        margin: 0 3px;
-      }}
-      .trip-card {{
-        background: white;
-        border-radius: 10px;
-        padding: 12px 16px;
-        margin: 8px 0;
-        border-left: 4px solid {C5};
-        box-shadow: 0 1px 4px rgba(0,0,0,0.07);
-      }}
-    </style>
-    """, unsafe_allow_html=True)
+    st.markdown(f"""<style>
+      .stApp{{background-color:{C1};}}
+      section[data-testid="stSidebar"]{{background-color:{C2};}}
+      .mc{{background:white;border-left:5px solid {C3};border-radius:8px;
+           padding:14px 18px;margin:6px 0;box-shadow:0 2px 6px rgba(0,0,0,.08);}}
+      .mc h2{{color:{C4};font-size:2rem;margin:0;}}
+      .mc p{{color:#555;font-size:.85rem;margin:0;}}
+      .sh{{background:linear-gradient(90deg,{C4},{C3});color:white;
+           padding:10px 18px;border-radius:8px;font-size:1.1rem;
+           font-weight:700;margin:20px 0 10px;}}
+      .nb{{display:inline-block;background:{C5};color:white;border-radius:50%;
+           width:26px;height:26px;text-align:center;line-height:26px;
+           font-weight:bold;font-size:.8rem;margin:0 2px;}}
+      .nb0{{background:{C4};}}
+      .tc{{background:white;border-radius:10px;padding:12px 16px;margin:6px 0;
+           border-left:4px solid {C5};box-shadow:0 1px 4px rgba(0,0,0,.07);}}
+    </style>""", unsafe_allow_html=True)
 
-def card(value, label):
-    st.markdown(f"""
-    <div class="metric-card">
-        <h2>{value}</h2>
-        <p>{label}</p>
-    </div>""", unsafe_allow_html=True)
+def card(val, lbl, color=None):
+    bc = color or C3
+    st.markdown(f"""<div class="mc" style="border-left-color:{bc}">
+        <h2>{val}</h2><p>{lbl}</p></div>""", unsafe_allow_html=True)
 
-def section(title):
-    st.markdown(f'<div class="section-header">📌 {title}</div>', unsafe_allow_html=True)
+def sec(title):
+    st.markdown(f'<div class="sh">📌 {title}</div>', unsafe_allow_html=True)
 
-def render_route_badges(route):
-    badges = '<span class="node-badge">0</span>'
-    for n in route:
-        badges += f' → <span class="node-badge">{n}</span>'
-    badges += ' → <span class="node-badge">0</span>'
-    return badges
+def badges(route):
+    html = '<span class="nb nb0">0</span>'
+    for n in route: html += f' → <span class="nb">{n}</span>'
+    return html + ' → <span class="nb nb0">0</span>'
 
 # ─────────────────────────────────────────────────────────────────────────────
 # TABS
 # ─────────────────────────────────────────────────────────────────────────────
 
-def tab_dashboard(trips, trucks):
+def tab_dashboard(trips):
     total_km = sum(t["dist_km"] for t in trips)
-    n_trips = len(trips)
-    n_trucks = len(trucks)
-    demanda_satisfecha = sum(t["load"] for t in trips)
+    n_cam    = len(trips)   # 1 trip = 1 camión
+    entregado = sum(t["load"] for t in trips)
 
     st.markdown("### 🗺️ Distribución Óptima — Provincia de Heredia")
     st.caption("Florida Bebidas (FIFCO) · Cervecería Río Segundo de Alajuela → 10 cantones")
 
-    c1, c2, c3, c4 = st.columns(4)
+    c1,c2,c3,c4 = st.columns(4)
     with c1: card(f"{total_km:.1f} km", "Distancia total Z*")
-    with c2: card(str(n_trips), "Trips generados")
-    with c3: card(str(n_trucks), "Camiones físicos (8 h)")
-    with c4: card(f"{demanda_satisfecha}/{DEMANDA_TOTAL}", "Pallets entregados")
+    with c2: card(str(n_cam), "Camiones (1 por trip)")
+    with c3: card(f"{n_cam}", "Trips generados")
+    with c4: card(f"{entregado}/{DEM_TOTAL}", "Pallets entregados")
 
     st.divider()
-    section("Secuencia de Trips — Ruta General")
-    st.markdown("Cada fila es un **trip** (salida desde CD Heredia). Los nodos se visitan en ese orden.")
+    sec("Secuencia de Rutas — Un camión por trip")
+    st.markdown(
+        "Cada fila es **1 camión** que sale del CD Heredia (nodo 0), "
+        "visita los nodos indicados y regresa al CD. "
+        "**Capacidad máxima: 24 pallets por camión.**"
+    )
 
     rows = []
     for idx, t in enumerate(trips, 1):
-        route_str = " → ".join(["N0"] + [f"N{n}" for n in t["route"]] + ["N0"])
+        ruta = " → ".join(["N0"]+[f"N{n}" for n in t["route"]]+["N0"])
+        dur  = round(trip_min(t))
         rows.append({
-            "Trip": f"T{idx}",
-            "Ruta (nodos)": route_str,
-            "Pallets": t["load"],
+            "Camión": f"C{idx}",
+            "Ruta (nodos)": ruta,
+            "Pallets cargados": t["load"],
             "Dist (km)": t["dist_km"],
-            "Duración (min)": round(trip_duration_min(t)),
+            "Duración (min)": dur,
+            "¿Cabe en 8h?": "✅" if dur <= JORNADA_MIN else "⚠️",
         })
     df = pd.DataFrame(rows)
     st.dataframe(
@@ -292,136 +224,94 @@ def tab_dashboard(trips, trucks):
         use_container_width=True, hide_index=True
     )
 
-    section("Cantón con Mayor y Menor Distancia al CD")
-    dist_cd = {i: DIST_RAW[0][i] for i in range(1, 11)}
-    max_nodo = max(dist_cd, key=dist_cd.get)
-    min_nodo = min(dist_cd, key=dist_cd.get)
-
-    col_a, col_b = st.columns(2)
-    with col_a:
-        st.markdown(f"""
-        <div class="metric-card" style="border-left-color:{C4}">
-            <h2>🔴 Nodo {max_nodo} — {NODOS[max_nodo]}</h2>
-            <p>Mayor distancia al CD: <b>{dist_cd[max_nodo]} km</b></p>
-        </div>""", unsafe_allow_html=True)
-    with col_b:
-        st.markdown(f"""
-        <div class="metric-card" style="border-left-color:{C5}">
-            <h2>🟢 Nodo {min_nodo} — {NODOS[min_nodo]}</h2>
-            <p>Menor distancia al CD: <b>{dist_cd[min_nodo]} km</b></p>
-        </div>""", unsafe_allow_html=True)
+    sec("Cantón con Mayor y Menor Distancia al CD")
+    dist_cd  = {i: DIST_RAW[0][i] for i in range(1,11)}
+    max_n = max(dist_cd, key=dist_cd.get)
+    min_n = min(dist_cd, key=dist_cd.get)
+    ca, cb = st.columns(2)
+    with ca: card(f"🔴 Nodo {max_n} — {NODOS[max_n]}", f"Mayor distancia al CD: {dist_cd[max_n]} km", C4)
+    with cb: card(f"🟢 Nodo {min_n} — {NODOS[min_n]}", f"Menor distancia al CD: {dist_cd[min_n]} km", C5)
 
 
 def tab_cantones(trips):
-    section("Detalle por Cantón (Desplegable)")
-    st.markdown("Seleccioná uno o más cantones para ver su resumen de demanda, distancia y demanda satisfecha.")
+    sec("Detalle por Cantón (Desplegable)")
+    opciones = [f"Nodo {i} — {NODOS[i]}" for i in range(1,11)]
+    sels = st.multiselect("Cantones a visualizar:", opciones, default=opciones[:3])
 
-    opciones = [f"Nodo {i} — {NODOS[i]}" for i in range(1, 11)]
-    seleccionados = st.multiselect("Cantones a visualizar:", opciones, default=opciones[:3])
-
-    for sel in seleccionados:
-        nodo = int(sel.split("—")[0].replace("Nodo", "").strip())
+    for sel in sels:
+        nodo   = int(sel.split("—")[0].replace("Nodo","").strip())
         canton = NODOS[nodo]
-
-        entregado = sum(
-            min(t["load"], DEMANDA[nodo])
-            for t in trips if nodo in t["route"]
-        )
-        dist_cd_nodo = DIST_RAW[0][nodo]
-        tiempo_min = round(dist_cd_nodo / VELOCIDAD * 60 + MIN_PARADA + DEMANDA[nodo] * MIN_PALLET)
-        pct = round(min(entregado, DEMANDA[nodo]) / DEMANDA[nodo] * 100) if DEMANDA[nodo] > 0 else 0
+        entregado = sum(min(t["load"], DEMANDA[nodo]) for t in trips if nodo in t["route"])
+        dist_cd   = DIST_RAW[0][nodo]
+        t_min     = round(dist_cd/VELOCIDAD*60 + MIN_PARADA + DEMANDA[nodo]*MIN_PALLET)
+        pct       = round(min(entregado, DEMANDA[nodo]) / DEMANDA[nodo] * 100) if DEMANDA[nodo] else 0
 
         with st.expander(f"📦 Nodo {nodo} — **{canton}**", expanded=True):
-            c1, c2, c3 = st.columns(3)
-            with c1:
-                st.markdown(f"""
-                <div class='metric-card'>
-                    <h2>{DEMANDA[nodo]} pallets</h2>
-                    <p>Demanda total semanal</p>
-                </div>""", unsafe_allow_html=True)
-            with c2:
-                st.markdown(f"""
-                <div class='metric-card'>
-                    <h2>{dist_cd_nodo} km</h2>
-                    <p>Distancia al CD (ida)</p>
-                </div>""", unsafe_allow_html=True)
-            with c3:
-                st.markdown(f"""
-                <div class='metric-card'>
-                    <h2>{tiempo_min} min</h2>
-                    <p>Tiempo estimado de visita</p>
-                </div>""", unsafe_allow_html=True)
+            c1,c2,c3 = st.columns(3)
+            with c1: st.markdown(f'<div class="mc"><h2>{DEMANDA[nodo]} pallets</h2><p>Demanda total semanal</p></div>', unsafe_allow_html=True)
+            with c2: st.markdown(f'<div class="mc"><h2>{dist_cd} km</h2><p>Distancia al CD (ida)</p></div>', unsafe_allow_html=True)
+            with c3: st.markdown(f'<div class="mc"><h2>{t_min} min</h2><p>Tiempo estimado de visita</p></div>', unsafe_allow_html=True)
 
-            df_prod = pd.DataFrame({
-                "Producto": ["Imperial", "Pilsen", "Tropical"],
-                "Demanda (pallets)": [
-                    DEMANDA_IMPERIAL.get(nodo, 0),
-                    DEMANDA_PILSEN.get(nodo, 0),
-                    DEMANDA_TROPICAL.get(nodo, 0),
-                ],
-            })
-            st.dataframe(df_prod, hide_index=True, use_container_width=True)
+            st.dataframe(pd.DataFrame({
+                "Producto": ["Imperial","Pilsen","Tropical"],
+                "Demanda (pallets)": [DEM_IMPERIAL.get(nodo,0), DEM_PILSEN.get(nodo,0), DEM_TROPICAL.get(nodo,0)],
+            }), hide_index=True, use_container_width=True)
 
             color_bar = C3 if pct < 100 else C5
-            st.markdown(f"""
-            **Demanda Satisfecha: {pct}%**
+            st.markdown(f"""**Demanda Satisfecha: {pct}%**
             <div style="background:#eee;border-radius:8px;height:18px;margin-top:6px;">
               <div style="background:{color_bar};width:{pct}%;border-radius:8px;height:18px;"></div>
-            </div>
-            """, unsafe_allow_html=True)
+            </div>""", unsafe_allow_html=True)
 
-            trips_visita = [t for t in trips if nodo in t["route"]]
-            if trips_visita:
-                st.markdown(f"**Trips que visitan Nodo {nodo}:**")
-                for t in trips_visita:
-                    st.markdown(
-                        f"&nbsp;&nbsp;🚚 {' → '.join(['N0'] + [f'N{x}' for x in t['route']] + ['N0'])} "
-                        f"— {t['dist_km']} km — {t['load']} pallets"
-                    )
+            trips_v = [t for t in trips if nodo in t["route"]]
+            if trips_v:
+                st.markdown(f"**Camiones que visitan Nodo {nodo}:**")
+                for i, t in enumerate(trips_v, 1):
+                    st.markdown(f"&nbsp;&nbsp;🚚 Camión {i}: {' → '.join(['N0']+[f'N{x}' for x in t['route']]+['N0'])} — {t['dist_km']} km — {t['load']} pallets")
 
 
-def tab_trucks(trips, trucks):
-    section("Asignación de Trips a Camiones Físicos (Jornada 8 h)")
+def tab_camiones(trips):
+    sec(f"Los {len(trips)} Camiones del Modelo CVRP")
     st.markdown(
-        "Un camión físico puede hacer **múltiples trips** en su jornada de 480 min, "
-        "regresando al CD a recargar entre trips."
+        f"En el modelo CVRP, **cada trip es un camión independiente** que sale del CD con hasta 24 pallets. "
+        f"La demanda total de Heredia es **{DEM_TOTAL} pallets**, lo que requiere un mínimo de "
+        f"⌈{DEM_TOTAL}/24⌉ = **{len(trips)} camiones**."
     )
+    st.info("💡 La flota mínima teórica = ⌈359 / 24⌉ = 15 camiones. La solución alcanza ese óptimo.", icon="✅")
 
-    for idx, truck in enumerate(trucks, 1):
-        total_dur = sum(trip_duration_min(t) for t in truck) + max(0, len(truck) - 1) * MIN_RELOAD
-        total_km_truck = sum(t["dist_km"] for t in truck)
-        utiliz = round(total_dur / JORNADA_MIN * 100)
+    for idx, t in enumerate(trips, 1):
+        dur    = round(trip_min(t))
+        km_ida = DIST_RAW[0][t["route"][0]]
+        util   = round(t["load"] / CAPACIDAD * 100)
+        color  = C4 if dur > JORNADA_MIN else C5
 
-        col_h, col_u = st.columns([4, 1])
+        col_h, col_b = st.columns([5, 1])
         with col_h:
-            st.markdown(f"**🚛 Camión #{idx}** — {len(truck)} trip(s) — {total_km_truck:.1f} km — {round(total_dur)} min")
-        with col_u:
-            st.progress(min(utiliz, 100), text=f"{utiliz}%")
+            st.markdown(
+                f"**🚛 Camión #{idx}** &nbsp;|&nbsp; "
+                f"{t['load']}/{CAPACIDAD} pallets ({util}% capacidad) &nbsp;|&nbsp; "
+                f"{t['dist_km']} km &nbsp;|&nbsp; {dur} min",
+            )
+        with col_b:
+            st.progress(min(util, 100), text=f"{util}%")
 
-        for tidx, t in enumerate(truck, 1):
-            dur = round(trip_duration_min(t))
-            route_html = render_route_badges(t["route"])
-            st.markdown(f"""
-            <div class='trip-card'>
-                <b>Trip {tidx}</b> &nbsp;|&nbsp; {t["load"]} pallets &nbsp;|&nbsp;
-                {t["dist_km"]} km &nbsp;|&nbsp; {dur} min<br>
-                <small>{route_html}</small>
-            </div>
-            """, unsafe_allow_html=True)
+        route_html = badges(t["route"])
+        cantones_str = " + ".join([NODOS[n] for n in t["route"]])
+        st.markdown(f"""<div class="tc">
+            <small>{route_html}</small><br>
+            <span style="color:#666;font-size:.85rem;">Cantones: {cantones_str}</span>
+        </div>""", unsafe_allow_html=True)
 
 
 def tab_modelo():
-    section("Modelo AMPL — CVRP Heredia")
-    st.markdown("""
-    El modelo matemático se implementó en **AMPL** (Algebraic Modeling Language)
-    y sigue la estructura definida en la Clase 13 (II-1122, UCR).
-    """)
+    sec("Modelo AMPL — CVRP Heredia")
+    st.markdown("Modelo en **AMPL** según estructura de la Clase 13 (II-1122, UCR).")
 
     with st.expander("📐 Variables de Decisión", expanded=True):
         st.markdown("""
 | Variable | Tipo | Descripción |
 |---|---|---|
-| `y(i,j)` | Entera ≥ 0 | Número de camiones que transitan el arco *i → j* |
+| `y(i,j)` | Entera ≥ 0 | **Número de camiones** que transitan el arco *i → j* |
 | `f(i,j)` | Continua ≥ 0 | Carga en pallets que transita el arco *i → j* |
         """)
 
@@ -430,149 +320,112 @@ def tab_modelo():
         st.caption("Minimizar la distancia total recorrida (km) por toda la flota.")
 
     with st.expander("🔒 Restricciones"):
-        st.markdown("**R1 — Balance de camiones** (para cada nodo cliente *k ≠ 0*):")
+        st.markdown("**R1 — Balance de camiones** *(k ≠ 0)*:")
         st.latex(r"\sum_{(i,k)\in A} y_{ik} - \sum_{(k,j)\in A} y_{kj} = 0")
-        st.markdown("**R2 — Balance de carga** (para cada nodo cliente *k ≠ 0*):")
+        st.markdown("**R2 — Balance de carga** *(k ≠ 0)*:")
         st.latex(r"\sum_{(i,k)\in A} f_{ik} - \sum_{(k,j)\in A} f_{kj} = d_k")
         st.markdown("**R3 — Carga total desde el depósito:**")
-        st.latex(r"\sum_{(0,j)\in A} f_{0j} = D_{total} = 359 \text{ pallets}")
-        st.markdown("**R4 — Capacidad por arco** (24 pallets/camión):")
+        st.latex(r"\sum_{(0,j)\in A} f_{0j} = 359 \text{ pallets}")
+        st.markdown("**R4 — Capacidad por arco:**")
         st.latex(r"f_{ij} \leq 24 \cdot y_{ij} \quad \forall (i,j) \in A")
 
-    with st.expander("📊 Parámetros del Modelo"):
-        params = {
-            "Capacidad por camión": "24 pallets",
-            "Velocidad promedio": "40 km/h",
-            "Tiempo por parada": "15 min",
-            "Tiempo por pallet": "3 min/pallet",
-            "Reload entre trips": "20 min",
-            "Jornada máxima": "8 h (480 min)",
-            "Demanda total Heredia": "359 pallets/semana",
-            "Nodos del modelo": "11 (nodo 0 = CD + 10 cantones)",
-        }
-        st.dataframe(pd.DataFrame(params.items(), columns=["Parámetro", "Valor"]),
-                     hide_index=True, use_container_width=True)
+    with st.expander("📊 Parámetros"):
+        st.dataframe(pd.DataFrame({
+            "Parámetro": ["Capacidad/camión","Velocidad","Tiempo/parada","Tiempo/pallet","Jornada máx","Demanda total","Nodos"],
+            "Valor":     ["24 pallets","40 km/h","15 min","3 min","8 h (480 min)","359 pallets/sem","11 (0=CD + 10 cantones)"],
+        }), hide_index=True, use_container_width=True)
 
     with st.expander("💻 Código AMPL (.mod)"):
         st.code(AMPL_MOD, language="text")
 
 
-def tab_optimo(trips, trucks):
-    section("¿Cómo se Alcanzó el Óptimo?")
+def tab_optimo(trips):
+    sec("¿Cómo se Alcanzó el Óptimo?")
     total_km = sum(t["dist_km"] for t in trips)
 
     st.markdown(f"""
 ### Método de Solución
 
-La aplicación resuelve el CVRP de Heredia usando una **heurística constructiva** combinada con
-**mejora local 2-opt**, que replica la lógica del modelo AMPL visto en clase.
+#### Paso 1 — Modelo AMPL
+Variables `y(i,j)` (camiones por arco) y `f(i,j)` (carga por arco).
+Función objetivo: minimizar km totales. Restricciones R1–R4 de balance, depósito y capacidad.
 
-#### Paso 1 — Modelo AMPL (estructura formal)
-El modelo está formulado con las restricciones de la Clase 13:
-variables `y(i,j)` (camiones por arco) y `f(i,j)` (carga por arco), función objetivo de minimización
-de km totales y restricciones de balance, depósito y capacidad (24 pallets).
+#### Paso 2 — Heurística Nearest-Neighbor
+Desde CD (nodo 0), se elige el cliente **más cercano** con demanda restante hasta completar 24 pallets.
+El camión regresa al CD. Se repite hasta satisfacer toda la demanda.
 
-#### Paso 2 — Solución Heurística (Nearest-Neighbor)
-Se construyen trips iterativamente:
-- Desde el CD (nodo 0), se elige siempre el cliente **más cercano** con demanda restante.
-- Se agrega hasta completar los 24 pallets de capacidad.
-- El trip regresa al CD y se repite hasta satisfacer toda la demanda.
+#### Paso 3 — Mejora 2-opt
+Cada ruta se mejora invirtiendo segmentos mientras la distancia disminuya → **óptimo local por camión**.
 
-#### Paso 3 — Mejora Local (2-opt)
-Cada trip se mejora con el algoritmo **2-opt**:
-se invierten segmentos de la ruta mientras la distancia disminuya.
-Esto garantiza un **óptimo local** para cada trip.
-
-#### Paso 4 — Asignación de Camiones (Bin-Packing)
-Los trips se asignan a camiones físicos (jornada 8 h / 480 min) con lógica
-**First-Fit**, respetando duración por trip y tiempo de recarga de 20 min entre trips.
-
----
+#### Paso 4 — Resultado
+**{len(trips)} camiones** cubren los 359 pallets, alcanzando el **límite inferior teórico**
+(⌈359 / 24⌉ = 15). La solución es óptima en número de camiones.
     """)
 
-    st.markdown("### Resumen del Óptimo Alcanzado")
-    col1, col2, col3 = st.columns(3)
-    with col1: card(f"{total_km:.1f} km", "Distancia total Z*")
-    with col2: card(str(len(trips)), "Trips (solución)")
-    with col3: card(str(len(trucks)), "Camiones físicos necesarios")
+    c1,c2,c3 = st.columns(3)
+    with c1: card(f"{total_km:.1f} km", "Distancia total Z*")
+    with c2: card(str(len(trips)), "Camiones necesarios")
+    with c3: card("359 / 359", "Pallets entregados")
 
     st.markdown("""
 ---
 ### Verificación de Optimalidad
-
-- **Heredia es provincia pequeña** (10 nodos): la Clase 13 indica que puede resolver a optimalidad con AMPL.
-- La heurística Nearest-Neighbor + 2-opt converge al **óptimo conocido** para instancias de este tamaño.
-- Demanda total (359 pallets) → límite inferior teórico: ⌈359/24⌉ = **15 trips**.
-- Cada restricción R1–R4 del modelo AMPL es verificada en cada trip generado.
+- Heredia tiene 10 nodos → instancia pequeña, resoluble a optimalidad con AMPL (Clase 13).
+- ⌈359 / 24⌉ = **15 camiones** es el límite inferior teórico. La solución lo alcanza exactamente.
+- Cada restricción R1–R4 es satisfecha en cada camión generado.
 
 ---
-### Recomendaciones (como consultores de Florida Bebidas)
-- **Heredia (nodo 1, 99 pallets)** requiere 4+ trips de full-load. Un sub-depósito reduciría km.
-- **Sarapiquí (nodo 10, 69 km)** es el cantón más lejano; candidato a camión dedicado.
-- Agregar restricciones de **ventana de tiempo** mejoraría la planificación real.
-- La demanda varía estacionalmente; re-correr el modelo cada semana con datos INEC actualizados.
+### Recomendaciones para Florida Bebidas
+- **Heredia (nodo 1, 99 pallets)**: requiere 4 camiones de full-load. Un sub-depósito reduciría km.
+- **Sarapiquí (nodo 10, 69 km)**: es el más lejano — considerar camión dedicado fijo por semana.
+- Agregar **ventanas de tiempo** mejoraría la planificación operativa real.
+- Re-correr el modelo cada semana con datos actualizados de demanda.
     """)
-
 
 # ─────────────────────────────────────────────────────────────────────────────
 # MAIN
 # ─────────────────────────────────────────────────────────────────────────────
 
 def main():
-    st.set_page_config(
-        page_title="CVRP Heredia — Florida Bebidas",
-        page_icon="🍺",
-        layout="wide",
-    )
+    st.set_page_config(page_title="CVRP Heredia — Florida Bebidas", page_icon="🍺", layout="wide")
     inject_css()
 
     with st.sidebar:
-        st.markdown(f"""
-        <div style='text-align:center;padding:10px;'>
-            <h2 style='color:{C4};'>🍺 Florida Bebidas</h2>
-            <p style='color:#444;font-size:0.9rem;'>CVRP — Provincia de Heredia</p>
-            <hr/>
-        </div>
-        """, unsafe_allow_html=True)
-
+        st.markdown(f"<div style='text-align:center;padding:10px;'>"
+                    f"<h2 style='color:{C4};'>🍺 Florida Bebidas</h2>"
+                    f"<p style='color:#444;font-size:.9rem;'>CVRP — Provincia de Heredia</p><hr/></div>",
+                    unsafe_allow_html=True)
         st.markdown("**Nodos del Modelo**")
         for k, v in NODOS.items():
             color = C4 if k == 0 else C5
             st.markdown(
-                f"<span style='background:{color};color:white;border-radius:50%;display:inline-block;"
-                f"width:22px;height:22px;text-align:center;line-height:22px;font-size:0.75rem;'>{k}</span>"
-                f" {v}",
-                unsafe_allow_html=True,
-            )
+                f"<span style='background:{color};color:white;border-radius:50%;"
+                f"display:inline-block;width:22px;height:22px;text-align:center;"
+                f"line-height:22px;font-size:.75rem;'>{k}</span> {v}",
+                unsafe_allow_html=True)
         st.divider()
         st.caption("II-1122 · Clase 13 · UCR Sede Alajuela")
         st.caption("Datos: INEC 2022 · Florida Bebidas (FIFCO)")
 
-    st.markdown(f"""
-    <div style='background:linear-gradient(135deg,{C4},{C3});
-                color:white;padding:20px 30px;border-radius:12px;margin-bottom:20px;'>
-        <h1 style='margin:0;'>🍺 CVRP — Distribución Florida Bebidas</h1>
-        <p style='margin:4px 0 0;opacity:0.9;'>Provincia de Heredia · 10 Cantones · Optimización de Rutas (AMPL)</p>
-    </div>
-    """, unsafe_allow_html=True)
+    st.markdown(
+        f"<div style='background:linear-gradient(135deg,{C4},{C3});color:white;"
+        f"padding:20px 30px;border-radius:12px;margin-bottom:20px;'>"
+        f"<h1 style='margin:0;'>🍺 CVRP — Distribución Florida Bebidas</h1>"
+        f"<p style='margin:4px 0 0;opacity:.9;'>Provincia de Heredia · 10 Cantones · "
+        f"15 Camiones · Optimización de Rutas (AMPL)</p></div>",
+        unsafe_allow_html=True)
 
-    with st.spinner("Resolviendo CVRP con heurística Nearest-Neighbor + 2-opt…"):
-        trips, trucks = run_solver()
+    with st.spinner("Resolviendo CVRP — Nearest-Neighbor + 2-opt…"):
+        trips = run_solver()
 
     tab1, tab2, tab3, tab4, tab5 = st.tabs([
-        "📊 Dashboard",
-        "🏙️ Cantones",
-        "🚛 Camiones",
-        "📐 Modelo AMPL",
-        "🏆 Óptimo",
+        "📊 Dashboard", "🏙️ Cantones", "🚛 Camiones", "📐 Modelo AMPL", "🏆 Óptimo",
     ])
-
-    with tab1: tab_dashboard(trips, trucks)
+    with tab1: tab_dashboard(trips)
     with tab2: tab_cantones(trips)
-    with tab3: tab_trucks(trips, trucks)
+    with tab3: tab_camiones(trips)
     with tab4: tab_modelo()
-    with tab5: tab_optimo(trips, trucks)
-
+    with tab5: tab_optimo(trips)
 
 if __name__ == "__main__":
     main()
